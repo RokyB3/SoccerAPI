@@ -445,7 +445,17 @@ class HierarchicalSACPolicy(nn.Module):
 
     def save(self, path):
         torch.save(self.state_dict(), path)
+    
     def load(self, path):
         self.load_state_dict(torch.load(path))
         self.eval()
         
+    def clone_weights(self, agent_list):
+        for other_agent in agent_list:
+            if other_agent.agent_id != self.agent_id:
+                self.discrete_policy.load_state_dict(other_agent.discrete_policy.state_dict())
+                self.continuous_policy.load_state_dict(other_agent.continuous_policy.state_dict())
+                self.q_value1.load_state_dict(other_agent.q_value1.state_dict())
+                self.q_value2.load_state_dict(other_agent.q_value2.state_dict())
+                self.q1_target.load_state_dict(other_agent.q1_target.state_dict())
+                self.q2_target.load_state_dict(other_agent.q2_target.state_dict())
