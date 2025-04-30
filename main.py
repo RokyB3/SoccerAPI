@@ -171,13 +171,16 @@ def initialize_server(load=False, num_agents=6, training_type="RL"):
             policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="RL") for i in range(num_agents)]
             if load:
                 # Load the model if needed
-                for i, p in enumerate(policy):
-                    p.load(f"rl_weights{i}.pt")
+                loaded_model = HierarchicalSACPolicy(buffer=buffer, agent_id=999, agent_type="RL")
+                loaded_model.load(f"rl_weights.pt")
+                loaded_model.clone_weights(policy) # duplicates weights to all other agents
         else:
             policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="imitation") for i in range(num_agents)]
             if load:
                 # Load the model if needed
-                policy.load(f"imitation_weights{i}.pt")
+                loaded_model = HierarchicalSACPolicy(buffer=buffer, agent_id=999, agent_type="imitation")
+                loaded_model.load(f"imitation_weights.pt")
+                loaded_model.clone_weights(policy) # duplicates weights to all other agents
 
 
 
@@ -324,10 +327,13 @@ async def act(state: WorldState, agent_id: int) -> Action:
 # add endpoints to save/load model if needed
 @app.post("/save")
 async def save():
-    policy.save("policy.pt")
+    if policy[0].agent_type == "RL":
+        policy[0].save("rl_weights.pt")
+    else:
+        policy[0].save("imitation_weights.pt")
     return {"status": "saved"}
 
-@app.post("/load")
-async def load():
-    policy.load("policy.pt")
-    return {"status": "loaded"}
+# @app.post("/load")
+# async def load():
+#     policy.load("policy.pt")
+#     return {"status": "loaded"}
