@@ -161,25 +161,30 @@ class Action(BaseModel):
 #     action_gen = random.choices(actions, weights=weights)[0]
 #     return action_gen()
 
-def initialize_server(load=False, num_agents=6, training_type="RL"):
-    global policy
-    policy = []
-    buffer = ReplayMemory(10000)
-    if type == "RL":
-        
-        policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="RL") for i in range(num_agents)]
-        if load:
-            # Load the model if needed
-            loaded_model = HierarchicalSACPolicy(buffer=buffer, agent_id=999, agent_type="RL")
-            loaded_model.load(f"rl_weights.pt")
-            loaded_model.clone_weights(policy) # duplicates weights to all other agents
-    else:
-        policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="imitation") for i in range(num_agents)]
-        if load:
-            # Load the model if needed
-            loaded_model = HierarchicalSACPolicy(buffer=buffer, agent_id=999, agent_type="imitation")
-            loaded_model.load(f"imitation_weights.pt")
-            loaded_model.clone_weights(policy) # duplicates weights to all other agents
+# def initialize_server(load=False, num_agents=11, training_type="RL"):
+#     global policy
+policy = []
+buffer = ReplayMemory(10000)
+load=False
+num_agents=11
+training_type="RL"
+
+
+if training_type == "RL":
+    
+    policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="RL") for i in range(num_agents)]
+    if load:
+        # Load the model if needed
+        loaded_model = HierarchicalSACPolicy(buffer=buffer, agent_id=999, agent_type="RL")
+        loaded_model.load(f"rl_weights.pt")
+        loaded_model.clone_weights(policy) # duplicates weights to all other agents
+else:
+    policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="imitation") for i in range(num_agents)]
+    if load:
+        # Load the model if needed
+        loaded_model = HierarchicalSACPolicy(buffer=buffer, agent_id=999, agent_type="imitation")
+        loaded_model.load(f"imitation_weights.pt")
+        loaded_model.clone_weights(policy) # duplicates weights to all other agents
 
 
 
