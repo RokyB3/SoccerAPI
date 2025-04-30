@@ -8,11 +8,32 @@ import torch
 # Import rl models
 from models import HierarchicalSACPolicy, DISCRETE_ACTIONS, CONTINUOUS_ACTIONS, MASKS, CONTINUOUS_ACTION_SCALE, ReplayMemory
 
-# Instantiate models
+#     global policy
 policy = []
+buffer = ReplayMemory(10000)
+load=False
+num_agents=11
+training_type="RL"
+
+
+if training_type == "RL":
+    
+    policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="RL", state_dim=17, discrete_dim=13, continuous_dims=13) for i in range(num_agents)]
+    if load:
+        # Load the model if needed
+        loaded_model = HierarchicalSACPolicy(buffer=buffer, agent_id=999, agent_type="RL", state_dim=17, discrete_dim=13, continuous_dims=13)
+        loaded_model.load(f"rl_weights.pt")
+        loaded_model.clone_weights(policy) # duplicates weights to all other agents
+else:
+    policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="imitation", state_dim=17, discrete_dim=13, continuous_dims=13) for i in range(num_agents)]
+    if load:
+        # Load the model if needed
+        loaded_model = HierarchicalSACPolicy(buffer=buffer, agent_id=999, agent_type="imitation", state_dim=17, discrete_dim=13, continuous_dims=13)
+        loaded_model.load(f"imitation_weights.pt")
+        loaded_model.clone_weights(policy) # duplicates weights to all other agents
+print("Policy initialized")
 
 app = FastAPI()
-num_agents = 11
 # # stateful memory for each agent (by unum)
 # agent_memories = {}
 
@@ -162,31 +183,6 @@ class Action(BaseModel):
 #     return action_gen()
 
 # def initialize_server(load=False, num_agents=11, training_type="RL"):
-#     global policy
-policy = []
-buffer = ReplayMemory(10000)
-load=False
-num_agents=11
-training_type="RL"
-
-
-if training_type == "RL":
-    
-    policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="RL", state_dim=17, discrete_dim=13, continuous_dims=13) for i in range(num_agents)]
-    if load:
-        # Load the model if needed
-        loaded_model = HierarchicalSACPolicy(buffer=buffer, agent_id=999, agent_type="RL", state_dim=17, discrete_dim=13, continuous_dims=13)
-        loaded_model.load(f"rl_weights.pt")
-        loaded_model.clone_weights(policy) # duplicates weights to all other agents
-else:
-    policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="imitation", state_dim=17, discrete_dim=13, continuous_dims=13) for i in range(num_agents)]
-    if load:
-        # Load the model if needed
-        loaded_model = HierarchicalSACPolicy(buffer=buffer, agent_id=999, agent_type="imitation", state_dim=17, discrete_dim=13, continuous_dims=13)
-        loaded_model.load(f"imitation_weights.pt")
-        loaded_model.clone_weights(policy) # duplicates weights to all other agents
-
-
 
 
 def state_to_tensor(state: WorldState):
@@ -291,7 +287,7 @@ async def act(state: WorldState, agent_id: int) -> Action:
     # if unum not in agent_memories:
     #     agent_memories[unum] = AgentMemory()
     # mem = agent_memories[unum]
-
+    print(state)
     s = state_to_tensor(state)
     done = False
     # first_step = False
@@ -335,7 +331,6 @@ async def save():
     return {"status": "saved"}
 
 
-initialize_server(load=False)
 # @app.post("/load")
 # async def load():
 #     policy.load("policy.pt")
