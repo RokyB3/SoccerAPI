@@ -289,18 +289,15 @@ async def act(state: WorldState, agent_id: int) -> Action:
 
     s = state_to_tensor(state)
     done = False
-    first_step = False
+    # first_step = False
 
     """
     We can deal with making the done work right here I guess?
     
     """
 
-    if first_step is False:
-        reward = reward_from_state(state)#, mem.last_state)
-        # policy.memory.push_final(s, reward, done)
-    else:
-        reward = 0.0
+    reward = reward_from_state(state)#, mem.last_state)
+    
 
     # train at end of ep, otherwise choose action
     if done and agent_id == 0:
