@@ -226,6 +226,9 @@ class ReplayMemory():
         
         return states, action_ds, action_cs, new_states, rewards, dones
 
+    def clear_intermediary(self):
+        self.intermediary_buffer.clear()
+
 
 class HierarchicalSACPolicy(nn.Module):
     def __init__(self, state_dim, discrete_dim, continuous_dims, buffer=ReplayMemory(10000), hidden_dim=256, agent_id=0, agent_type="RL"):
@@ -360,6 +363,9 @@ class HierarchicalSACPolicy(nn.Module):
             self.train_rl()
         elif self.agent_type == "imitation":
             self.train_imitation()
+
+        # clear memory
+        self.memory.clear_intermediary()
     
     def train_rl(self):
         # sample from memory

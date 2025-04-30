@@ -6,23 +6,23 @@ import math
 import torch
 
 # Import rl models
-from models import HierarchicalSACPolicy, DISCRETE_ACTIONS, CONTINUOUS_ACTIONS, MASKS, CONTINUOUS_ACTION_SCALE
+from models import HierarchicalSACPolicy, DISCRETE_ACTIONS, CONTINUOUS_ACTIONS, MASKS, CONTINUOUS_ACTION_SCALE, ReplayMemory
 
 # Instantiate models
-policy = HierarchicalSACPolicy(state_dim=17, discrete_dim=17, continuous_dims=2)
+policy = []
 
 app = FastAPI()
 
-# stateful memory for each agent (by unum)
-agent_memories = {}
+# # stateful memory for each agent (by unum)
+# agent_memories = {}
 
-class AgentMemory:
-    def __init__(self):
-        self.last_state = None
-        self.last_action_d = None
-        self.last_action_c = None
-        self.last_reward = 0.0
-        self.last_time = None
+# class AgentMemory:
+#     def __init__(self):
+#         self.last_state = None
+#         self.last_action_d = None
+#         self.last_action_c = None
+#         self.last_reward = 0.0
+#         self.last_time = None
 
 class Position(BaseModel):
     x: float
@@ -161,6 +161,27 @@ class Action(BaseModel):
 #     action_gen = random.choices(actions, weights=weights)[0]
 #     return action_gen()
 
+def initialize_server(load=False, num_agents=6, training_type="RL"):
+    global policy
+    policy = []
+    buffer = ReplayMemory(10000)
+    for i in range(num_agents):
+        if type == "RL":
+            
+            policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="RL") for i in range(num_agents)]
+            if load:
+                # Load the model if needed
+                for i, p in enumerate(policy):
+                    p.load(f"rl_weights{i}.pt")
+        else:
+            policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="imitation") for i in range(num_agents)]
+            if load:
+                # Load the model if needed
+                policy.load(f"imitation_weights{i}.pt")
+
+
+
+
 def state_to_tensor(state: WorldState):
     # flatten state to tensor, must match model's expected input
     # this is a stub, you need to implement this properly
@@ -261,30 +282,44 @@ def action_to_api_action(action_d, action_c):
     return Action(type=action_type, params=params)
 
 @app.post("/act")
-async def act(state: WorldState) -> Action:
-    unum = state.self.unum
-    if unum not in agent_memories:
-        agent_memories[unum] = AgentMemory()
-    mem = agent_memories[unum]
+async def act(state: WorldState, agent_id: int) -> Action:
+    # unum = state.self.unum
+    # if unum not in agent_memories:
+    #     agent_memories[unum] = AgentMemory()
+    # mem = agent_memories[unum]
 
     s = state_to_tensor(state)
     done = False
+    first_step = False
 
-    if mem.last_state is not None:
-        reward = reward_from_state(state, mem.last_state)
-        policy.memory.push_final(s, reward, done)
+    """
+    We can deal with making the done work right here I guess?
+    
+    """
+
+    if first_step is False:
+        reward = reward_from_state(state)#, mem.last_state)
+        # policy.memory.push_final(s, reward, done)
     else:
         reward = 0.0
 
-    with torch.no_grad():
-        action_d, action_c = policy.choose_action(s, reward, done)
+    # train at end of ep, otherwise choose action
+    if done and agent_id == 0:
+        policy[0].train()
+        policy[0].clone_weights(policy) # duplicates weights to all other agents
+    else:    
+        with torch.no_grad():
+            action_d, action_c = policy[agent_id].choose_action(s, reward, done)
+    
+    
+        
 
-    mem.last_state = state
-    mem.last_action_d = action_d
-    mem.last_action_c = action_c
-    mem.last_reward = reward
+    # mem.last_state = state
+    # mem.last_action_d = action_d
+    # mem.last_action_c = action_c
+    # mem.last_reward = reward
 
-    policy.train()
+    # policy.train()
 
     # convert RL action to API action
     return action_to_api_action(action_d, action_c)
