@@ -309,11 +309,11 @@ class HierarchicalSACPolicy(nn.Module):
         # squashed gaussian: tanh(mu_c + sigma_c * N(0, 1))
         return pi_d, mu_c, sigma_c
     
-    # in: state, discrete action (one-hot), continuous action
-    # out: Q value (estimate of expected return)
-    def get_q_value(self, state, continuous_action):
-        q_input = torch.cat([state, continuous_action], dim=-1)
-        return self.q_value(q_input)
+    # # in: state, discrete action (one-hot), continuous action
+    # # out: Q value (estimate of expected return)
+    # def get_q_value(self, state, continuous_action):
+    #     q_input = torch.cat([state, continuous_action], dim=-1)
+    #     return self.q_value(q_input)
 
     # in: state
     # out: discrete action (one-hot), continuous actions (sampled from Gaussian then scaled)
@@ -343,7 +343,7 @@ class HierarchicalSACPolicy(nn.Module):
         
         masked_c = scaled_c * TENSOR_MASKS[action_d.item()]
 
-        return action_d, action_c
+        return action_d, masked_c
     
     def log_probs(self, state, action_d, action_c):
         # get distributions
@@ -426,26 +426,35 @@ class HierarchicalSACPolicy(nn.Module):
         self.continuous_policy_optimizer.step()
 
     def train_imitation(self):
+
+        num_epochs = 5
         # train with direct behavioural cloning
-        for i in range(5):
+        for i in range(num_epochs):
             states, action_ds, action_cs = self.memory.sample_imitation(64)
-            # get Q values for current state and next state
-            q1 = self.q_value1(states, action_cs)
-            q2 = self.q_value2(states, action_cs)
+            # ignore Q values: don't care about rewards whatsoever.
 
             # get log probs for discrete and continuous actions
             log_prob_d, log_prob_c = self.log_probs(states, action_ds, action_cs)
             log_prob_d = log_prob_d.gather(1, action_ds.unsqueeze(1)).squeeze(1)
             log_prob_c = log_prob_c.gather(1, action_cs.unsqueeze(1)).squeeze(1)
 
-            # compute imitation loss
-            imitation_loss_d = F.cross_entropy(q1, action_ds) + F.cross_entropy(q2, action_ds)
-            imitation_loss_c = F.mse_loss(log_prob_c, action_cs)
+            # we want discrete_policy to output the same action as action_ds
+            # and continuous_policy to output the same action as action_cs
+            # so we can use cross entropy loss for discrete and MSE for continuous
+    
+            # discrete action loss
+            discrete_action_loss = F.cross_entropy(self.discrete_policy(states), action_ds)
+            # continuous action loss
+            continuous_action_loss = F.mse_loss(self.continuous_policy(states), action_cs)
+            # combine losses
+            imitation_loss_d = discrete_action_loss + self.alpha_d * log_prob_d.mean()
+            imitation_loss_c = continuous_action_loss + self.alpha_c * log_prob_c.mean()
 
-            # update policy networks according to SAC
+            # propagate gradients
             self.discrete_policy_optimizer.zero_grad()
             imitation_loss_d.backward()
             self.discrete_policy_optimizer.step()
+
             self.continuous_policy_optimizer.zero_grad()
             imitation_loss_c.backward()
             self.continuous_policy_optimizer.step()
