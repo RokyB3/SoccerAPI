@@ -210,7 +210,7 @@ def state_to_tensor(state: WorldState):
         arr.append(0.0)
     return torch.tensor(arr, dtype=torch.float32).unsqueeze(0)  # shape (1, 17)
 
-def reward_from_state(state: WorldState, prev_state: WorldState):
+def reward_from_state(state: WorldState):
     # -1 per step, +100 if goal scored (dummy: you need to implement real goal detection)
     # for now, just -1 per step
     return -1.0
