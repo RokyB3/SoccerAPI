@@ -169,18 +169,19 @@ print("TENSOR_MASKS:\n", TENSOR_MASKS)
 
 
 class ReplayMemory():
-    def __init__(self, capacity, agent_type="rl"):
+    def __init__(self, capacity, agent_type="rl", agent_id=0):
         self.buffer = collections.deque()
         self.intermediary_buffer = {}
         self.capacity = capacity
         self.agent_type = agent_type
+        self.agent_id = agent_id
 
     def push_intermediary(self, state, action_d, action_c):
-        self.intermediary_buffer[agent_id] = (state, action_d, action_c)
+        self.intermediary_buffer[self.agent_id] = (state, action_d, action_c)
 
     def push_final(self, new_state, reward, done):
-        if self.intermediary_buffer[agent_id] is not None:
-            state, action_d, action_c = self.intermediary_buffer[agent_id]
+        if self.intermediary_buffer[self.agent_id] is not None:
+            state, action_d, action_c = self.intermediary_buffer[self.agent_id]
             self.buffer.append((state, action_d, action_c, new_state, reward, done))
         # self.intermediary_buffer.clear()
 
@@ -227,7 +228,7 @@ class ReplayMemory():
 
 
 class HierarchicalSACPolicy(nn.Module):
-    def __init__(self, state_dim, discrete_dim, continuous_dims, buffer=ReplayMemory(10000) hidden_dim=256, agent_id=0, agent_type="RL"):
+    def __init__(self, state_dim, discrete_dim, continuous_dims, buffer=ReplayMemory(10000), hidden_dim=256, agent_id=0, agent_type="RL"):
         super(HierarchicalSACPolicy, self).__init__()
         self.state_dim = state_dim
         self.discrete_dim = discrete_dim
