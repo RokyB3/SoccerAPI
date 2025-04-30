@@ -205,11 +205,8 @@ def action_to_api_action(action_d, action_c):
     # map continuous params to their names and scale
     for i, c_idx in enumerate(mask):
         param_name = CONTINUOUS_ACTIONS[c_idx]
-        # scale value to expected range
-        minv, maxv = CONTINUOUS_ACTION_SCALE[param_name]
         val = action_c[c_idx].item()
-        # assuming action_c is in [-1, 1] due to tanh, rescale:
-        val = (val + 1) / 2 * (maxv - minv) + minv
+
         # now map param_name to the expected json param
         # e.g. "body_turn_to_point_x" -> "point": {"x": ...}
         if "point_x" in param_name:
