@@ -169,19 +169,18 @@ print("TENSOR_MASKS:\n", TENSOR_MASKS)
 
 
 class ReplayMemory():
-    def __init__(self, capacity, agent_type="rl", agent_id=0):
+    def __init__(self, capacity, agent_type="rl"):
         self.buffer = collections.deque()
         self.intermediary_buffer = {}
         self.capacity = capacity
         self.agent_type = agent_type
-        self.agent_id = agent_id
 
-    def push_intermediary(self, state, action_d, action_c):
-        self.intermediary_buffer[self.agent_id] = (state, action_d, action_c)
+    def push_intermediary(self, state, action_d, action_c, agent_id):
+        self.intermediary_buffer[agent_id] = (state, action_d, action_c)
 
-    def push_final(self, new_state, reward, done):
-        if self.intermediary_buffer[self.agent_id] is not None:
-            state, action_d, action_c = self.intermediary_buffer[self.agent_id]
+    def push_final(self, new_state, reward, done, agent_id):
+        if self.intermediary_buffer[agent_id] is not None:
+            state, action_d, action_c = self.intermediary_buffer[agent_id]
             self.buffer.append((state, action_d, action_c, new_state, reward, done))
         # self.intermediary_buffer.clear()
 
@@ -319,7 +318,7 @@ class HierarchicalSACPolicy(nn.Module):
     # out: discrete action (one-hot), continuous actions (sampled from Gaussian then scaled)
     def choose_action(self, state, prev_reward, done):
         # save experience using environmental feedback
-        self.memory.push_final(state, prev_reward, done)
+        self.memory.push_final(state, prev_reward, done, self.agent_id)
         if done:
             return
 
@@ -342,6 +341,8 @@ class HierarchicalSACPolicy(nn.Module):
         scaled_c = (action_c * (CONTINUOUS_ACTION_SCALE[CONTINUOUS_ACTIONS[action_d.item()]][1] - CONTINUOUS_ACTION_SCALE[CONTINUOUS_ACTIONS[action_d.item()]][0]) / 2)+ (CONTINUOUS_ACTION_SCALE[CONTINUOUS_ACTIONS[action_d.item()]][1] + CONTINUOUS_ACTION_SCALE[CONTINUOUS_ACTIONS[action_d.item()]][0]) / 2
         
         masked_c = scaled_c * TENSOR_MASKS[action_d.item()]
+
+        self.memory.push_intermediary(state, action_d, masked_c, self.agent_id)
 
         return action_d, masked_c
     
