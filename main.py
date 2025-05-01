@@ -17,7 +17,6 @@ training_type="RL"
 
 
 if training_type == "RL":
-    
     policy = [HierarchicalSACPolicy(buffer=buffer, agent_id=i, agent_type="RL", state_dim=17, discrete_dim=13, continuous_dims=13) for i in range(num_agents)]
     if load:
         # Load the model if needed
@@ -186,12 +185,14 @@ class Action(BaseModel):
 
 
 def state_to_tensor(state: WorldState):
-    # flatten state to tensor, must match model's expected input
-    # this is a stub, you need to implement this properly
+    # ensure unum is valid and never zero
+    unum = max(1, min(11, state.self.unum))
+    
+    # flatten state to tensor
     arr = [
         float(state.self.isFrozen),
         float(state.self.tackleExpires),
-        float(state.self.unum),
+        float(unum),  # use validated unum
         float(state.self.posValid),
         float(state.self.isKickable),
         float(state.self.goalie),
@@ -203,7 +204,6 @@ def state_to_tensor(state: WorldState):
         float(state.ball.seenPosCount),
         float(state.time.current),
         float(state.time.stopped),
-        # add more features as needed
     ]
     # pad to 17 dims if needed
     while len(arr) < 17:
@@ -283,43 +283,36 @@ def action_to_api_action(action_d, action_c):
 
 @app.post("/act")
 async def act(state: WorldState, agent_id: int) -> Action:
-    # unum = state.self.unum
-    # if unum not in agent_memories:
-    #     agent_memories[unum] = AgentMemory()
-    # mem = agent_memories[unum]
-    print(state)
+    # validate and fix agent number
+    if state.self.unum < 1 or state.self.unum > 11:
+        print(f"Warning: Invalid agent number {state.self.unum}, using agent_id {agent_id}")
+        # if both are invalid, use 1 as a safe default
+        if agent_id < 1 or agent_id > 11:
+            agent_id = 1
+        state.self.unum = agent_id
+    
+    print(f"Processing action for agent {state.self.unum}")
     s = state_to_tensor(state)
     done = False
-    # first_step = False
+    reward = reward_from_state(state)
 
-    """
-    We can deal with making the done work right here I guess?
+    # convert to 0-based index for policy array
+    agent_idx = state.self.unum - 1
     
-    """
-
-    reward = reward_from_state(state)#, mem.last_state)
-    
-
     # train at end of ep, otherwise choose action
-    if done and agent_id == 0:
+    if done and agent_idx == 0:
         policy[0].train()
-        policy[0].clone_weights(policy) # duplicates weights to all other agents
+        policy[0].clone_weights(policy)
     else:    
         with torch.no_grad():
-            action_d, action_c = policy[agent_id].choose_action(s, reward, done)
-    
-    
-        
+            try:
+                action_d, action_c = policy[agent_idx].choose_action(s, reward, done)
+                return action_to_api_action(action_d, action_c)
+            except Exception as e:
+                print(f"Error generating action for agent {state.self.unum}: {e}")
+                return Action(type="Body_TurnToBall", params={})
 
-    # mem.last_state = state
-    # mem.last_action_d = action_d
-    # mem.last_action_c = action_c
-    # mem.last_reward = reward
-
-    # policy.train()
-
-    # convert RL action to API action
-    return action_to_api_action(action_d, action_c)
+    return Action(type="Body_TurnToBall", params={})
 
 # add endpoints to save/load model if needed
 @app.post("/save")

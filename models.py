@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import collections
+import torch.distributions as D
 
 
 map_minx = -55
@@ -156,14 +157,14 @@ MASKS = {
     22: [27, 28, 29, 30], # body_smart_kick_x, body_smart_kick_y, body_smart_kick_first_speed, body_smart_kick_first_speed_thr
 }
 
-# define tensor masks based on these (all zeroes except for 1 at the indices)
+# first fix the tensor masks creation
 TENSOR_MASKS = {}
 for i in range(len(DISCRETE_ACTIONS)):
     mask = torch.zeros(len(CONTINUOUS_ACTIONS))
     if i in MASKS:
         for j in MASKS[i]:
             mask[j] = 1
-    TENSOR_MASKS[i] = mask
+    TENSOR_MASKS[i] = mask.unsqueeze(0)  # add batch dimension
 
 print("TENSOR_MASKS:\n", TENSOR_MASKS)
 
@@ -171,18 +172,20 @@ print("TENSOR_MASKS:\n", TENSOR_MASKS)
 class ReplayMemory():
     def __init__(self, capacity, agent_type="rl"):
         self.buffer = collections.deque()
-        self.intermediary_buffer = {}
+        self.intermediary_buffer = {i: None for i in range(11)}  # initialize for all agents
         self.capacity = capacity
         self.agent_type = agent_type
 
     def push_intermediary(self, state, action_d, action_c, agent_id):
         self.intermediary_buffer[agent_id] = (state, action_d, action_c)
 
-    def push_final(self, new_state, reward, done, agent_id):
+    def push_final(self, state, reward, done, agent_id):
+        if agent_id not in self.intermediary_buffer:
+            self.intermediary_buffer[agent_id] = None
+            
         if self.intermediary_buffer[agent_id] is not None:
-            state, action_d, action_c = self.intermediary_buffer[agent_id]
-            self.buffer.append((state, action_d, action_c, new_state, reward, done))
-        # self.intermediary_buffer.clear()
+            prev_state, action_d, action_c = self.intermediary_buffer[agent_id]
+            self.buffer.append((prev_state, action_d, action_c, state, reward, done))
 
         while len(self.buffer) > self.capacity:
             self.buffer.popleft()
@@ -234,12 +237,11 @@ class HierarchicalSACPolicy(nn.Module):
         super(HierarchicalSACPolicy, self).__init__()
         self.state_dim = state_dim
         self.discrete_dim = discrete_dim
-        self.continuous_dims = continuous_dims
+        self.continuous_dims = len(CONTINUOUS_ACTIONS)  # use full continuous action space size
         self.hidden_dim = hidden_dim
 
         self.agent_id = agent_id
         self.agent_type = agent_type
-
         self.memory = buffer
 
         self.discrete_policy = nn.Sequential(
@@ -248,10 +250,11 @@ class HierarchicalSACPolicy(nn.Module):
             nn.Linear(hidden_dim, discrete_dim)
         )
 
+        # modify continuous policy to output correct dimensions
         self.continuous_policy = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 2*continuous_dims)
+            nn.Linear(hidden_dim, 2 * len(CONTINUOUS_ACTIONS))  # output mean and std for each action
         )
 
         self.q_value1 = nn.Sequential(
@@ -301,11 +304,10 @@ class HierarchicalSACPolicy(nn.Module):
         pi_d = F.softmax(self.discrete_policy(state), dim=-1)
 
         # mu_c and sigma_c for continuous action
-        continuous_action_params = self.continuous_policy(state)
-        mu_c = continuous_action_params[:, :self.continuous_dims]
-        sigma_c = F.softplus(continuous_action_params[:, self.continuous_dims:])
+        continuous_output = self.continuous_policy(state)
+        mu_c = continuous_output[:, :self.continuous_dims]
+        sigma_c = F.softplus(continuous_output[:, self.continuous_dims:])  # ensure positive std dev
 
-        # squashed gaussian: tanh(mu_c + sigma_c * N(0, 1))
         return pi_d, mu_c, sigma_c
     
     # # in: state, discrete action (one-hot), continuous action
@@ -324,36 +326,42 @@ class HierarchicalSACPolicy(nn.Module):
 
         # get distributions
         pi_d, mu_c, sigma_c = self.forward(state)
+        
         # sample discrete action categorically
-        dist_d = torch.Categorical(logits=pi_d)
+        dist_d = D.Categorical(logits=pi_d)
         action_d = dist_d.sample()
-        # sample and re-scale continuous action from Gaussian
-        dist_c = torch.distributions.Normal(mu_c, sigma_c)
+        
+        # ensure mu_c and sigma_c have correct shapes
+        mu_c = mu_c.view(1, -1)
+        sigma_c = sigma_c.view(1, -1)
+        
+        # sample continuous actions
+        dist_c = D.Normal(mu_c, sigma_c + 1e-6)  # add small epsilon to prevent zero std
         sample_c = dist_c.rsample()
         action_c = torch.tanh(sample_c)
 
-        # types:
-        # action_d: torch.tensor([x]) where x is the index of the action selected
-        # action_c: torch.tensor([x1, x2, ...]) where x1, x2, ... are all continuous actions
-
-        # scale continuous actions based on discrete action
-        # multiply by (max-min)/2 then add (max+min)/2
-        scaled_c = (action_c * (CONTINUOUS_ACTION_SCALE[CONTINUOUS_ACTIONS[action_d.item()]][1] - CONTINUOUS_ACTION_SCALE[CONTINUOUS_ACTIONS[action_d.item()]][0]) / 2)+ (CONTINUOUS_ACTION_SCALE[CONTINUOUS_ACTIONS[action_d.item()]][1] + CONTINUOUS_ACTION_SCALE[CONTINUOUS_ACTIONS[action_d.item()]][0]) / 2
+        # get mask for selected discrete action
+        action_idx = action_d.item()
+        mask = TENSOR_MASKS[action_idx]
         
-        masked_c = scaled_c * TENSOR_MASKS[action_d.item()]
+        # scale each continuous action according to its range
+        scaled_c = action_c.clone()
+        for i, (min_val, max_val) in enumerate(CONTINUOUS_ACTION_SCALE.values()):
+            scaled_c[0, i] = action_c[0, i] * (max_val - min_val) / 2 + (max_val + min_val) / 2
+            
+        masked_c = scaled_c * mask
 
         self.memory.push_intermediary(state, action_d, masked_c, self.agent_id)
-
         return action_d, masked_c
     
     def log_probs(self, state, action_d, action_c):
         # get distributions
         pi_d, mu_c, sigma_c = self.forward(state)
         # sample discrete action categorically
-        dist_d = torch.Categorical(logits=pi_d)
+        dist_d = D.Categorical(logits=pi_d)
         log_prob_d = dist_d.log_prob(action_d)
         # sample and re-scale continuous action from Gaussian
-        dist_c = torch.distributions.Normal(mu_c, sigma_c)
+        dist_c = D.Normal(mu_c, sigma_c)
         sample_c = dist_c.rsample()
         log_prob_c = dist_c.log_prob(sample_c) - torch.log(1 - action_c.pow(2) + 1e-6)
 
